@@ -325,4 +325,4 @@ This extension is not affiliated with, endorsed by, or sponsored by WhatsApp Inc
 The extension only accesses publicly visible contact information in WhatsApp groups and does not access private messages, media, or other sensitive data.
 \`\`\`
 
-```json file="" isHidden
+\`\`\`json file="" isHidden
