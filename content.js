@@ -11,11 +11,21 @@ class WhatsAppContactsExtractor {
         '[data-testid="conversation-header"]',
         'header[data-testid="conversation-header"]',
         '.copyable-text[data-testid="conversation-title"]',
+        'div[role="banner"]',
+        "header",
       ],
       conversationTitle: [
         '[data-testid="conversation-title"]',
         '.copyable-text[data-testid="conversation-title"]',
         "span[title]",
+        "div[title]",
+      ],
+      groupIndicators: [
+        '[data-testid="group-info-drawer"]',
+        'span[title*="participants"]',
+        'span[title*="members"]',
+        'div[title*="participants"]',
+        'div[title*="members"]',
       ],
       groupInfoDrawer: ['[data-testid="group-info-drawer"]', '[data-testid="drawer-right"]', ".drawer-section-body"],
       participantsSection: [
@@ -38,37 +48,117 @@ class WhatsAppContactsExtractor {
       ],
     }
 
+    console.log("[v0] WhatsApp Contacts Extractor initializing...")
     this.init()
   }
 
   init() {
+    console.log("[v0] Starting initialization...")
     this.checkGroupStatus()
     this.setupMessageListener()
+    console.log("[v0] Initialization complete. Group status:", this.isGroupOpen, "Group name:", this.groupName)
   }
 
   checkGroupStatus() {
+    console.log("[v0] Checking group status...")
+
+    this.isGroupOpen = false
+    this.groupName = ""
+
+    // Method 1: Check conversation header
     const groupHeader = this.findElement(this.selectors.conversationHeader)
+    console.log("[v0] Found header element:", !!groupHeader)
+
     if (groupHeader) {
       const titleElement = this.findElement(this.selectors.conversationTitle, groupHeader)
+      console.log("[v0] Found title element:", !!titleElement)
+
       if (titleElement) {
         this.groupName = titleElement.textContent.trim()
-        this.isGroupOpen = true
+        console.log("[v0] Extracted group name:", this.groupName)
 
+        // Method 2: Check for participant count in header area
         const participantCount = this.getParticipantCountFromHeader(groupHeader)
-        if (participantCount && participantCount > 1) {
+        console.log("[v0] Participant count from header:", participantCount)
+
+        // Method 3: Look for group indicators anywhere in the header area
+        const hasGroupIndicator = this.hasGroupIndicators(groupHeader)
+        console.log("[v0] Has group indicators:", hasGroupIndicator)
+
+        if (this.groupName && (participantCount > 1 || hasGroupIndicator || this.isLikelyGroupName(this.groupName))) {
           this.isGroupOpen = true
+          console.log("[v0] Group detected successfully!")
         }
       }
     }
+
+    if (!this.isGroupOpen) {
+      const chatArea =
+        document.querySelector('[data-testid="conversation-panel-body"]') ||
+        document.querySelector('[data-testid="main"]') ||
+        document.querySelector('div[role="main"]')
+
+      if (chatArea && this.groupName) {
+        console.log("[v0] Fallback: Found chat area, assuming group if name exists")
+        this.isGroupOpen = true
+      }
+    }
+
+    console.log("[v0] Final group status - Open:", this.isGroupOpen, "Name:", this.groupName)
+  }
+
+  hasGroupIndicators(headerElement) {
+    // Look for text that indicates this is a group
+    const textContent = headerElement.textContent.toLowerCase()
+    const groupKeywords = ["participants", "members", "group", "admin"]
+
+    for (const keyword of groupKeywords) {
+      if (textContent.includes(keyword)) {
+        return true
+      }
+    }
+
+    // Look for specific group indicator elements
+    for (const selector of this.selectors.groupIndicators) {
+      if (headerElement.querySelector(selector) || document.querySelector(selector)) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  isLikelyGroupName(name) {
+    if (!name || name.length < 2) return false
+
+    // Individual contact names are usually shorter and don't contain certain patterns
+    const groupPatterns = [
+      /group/i,
+      /team/i,
+      /family/i,
+      /friends/i,
+      /class/i,
+      /work/i,
+      /project/i,
+      /\d{4}/, // Years
+      
+ {6}/[📱💬🏠👥]/u, // Common group emojis
+    ]
+
+    return groupPatterns.some((pattern) => pattern.test(name)) || name.length > 20
   }
 
   getParticipantCountFromHeader(headerElement) {
-    const subtitleElements = headerElement.querySelectorAll("span")
+    const subtitleElements = headerElement.querySelectorAll("span, div")
     for (const element of subtitleElements) {
       const text = element.textContent.trim()
-      const match = text.match(/(\d+)\s+participants?/i)
-      if (match) {
-        return Number.parseInt(match[1])
+      const patterns = [/(\d+)\s+participants?/i, /(\d+)\s+members?/i, /(\d+)\s+people/i, /(\d+)\s+contacts?/i]
+
+      for (const pattern of patterns) {
+        const match = text.match(pattern)
+        if (match) {
+          return Number.parseInt(match[1])
+        }
       }
     }
     return null
@@ -91,26 +181,45 @@ class WhatsAppContactsExtractor {
   }
 
   setupMessageListener() {
+    console.log("[v0] Setting up message listener...")
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      console.log("[v0] Received message:", request.action)
+
       switch (request.action) {
         case "checkStatus":
           this.checkGroupStatus()
-          sendResponse({
+          const response = {
             isGroupOpen: this.isGroupOpen,
             groupName: this.groupName,
-          })
+          }
+          console.log("[v0] Sending status response:", response)
+          sendResponse(response)
           break
 
         case "exportContacts":
+          console.log("[v0] Starting export with options:", request.options)
           this.exportContacts(request.options)
-            .then((result) => sendResponse(result))
-            .catch((error) => sendResponse({ success: false, error: error.message }))
+            .then((result) => {
+              console.log("[v0] Export completed:", result)
+              sendResponse(result)
+            })
+            .catch((error) => {
+              console.error("[v0] Export failed:", error)
+              sendResponse({ success: false, error: error.message })
+            })
           return true // Keep message channel open for async response
 
         case "quickScan":
+          console.log("[v0] Starting quick scan...")
           this.quickScanContacts()
-            .then((result) => sendResponse(result))
-            .catch((error) => sendResponse({ success: false, error: error.message }))
+            .then((result) => {
+              console.log("[v0] Quick scan completed:", result)
+              sendResponse(result)
+            })
+            .catch((error) => {
+              console.error("[v0] Quick scan failed:", error)
+              sendResponse({ success: false, error: error.message })
+            })
           return true
       }
     })
@@ -578,11 +687,26 @@ class WhatsAppContactsExtractor {
   }
 }
 
-// Initialize the extractor when the page loads
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => {
-    new WhatsAppContactsExtractor()
-  })
-} else {
+console.log("[v0] Content script loaded, document state:", document.readyState)
+
+function initializeExtractor() {
+  console.log("[v0] Initializing extractor...")
   new WhatsAppContactsExtractor()
 }
+
+if (document.readyState === "loading") {
+  console.log("[v0] Document still loading, waiting for DOMContentLoaded...")
+  document.addEventListener("DOMContentLoaded", initializeExtractor)
+} else {
+  console.log("[v0] Document ready, initializing immediately...")
+  initializeExtractor()
+}
+
+setTimeout(() => {
+  console.log("[v0] Delayed initialization check...")
+  if (!window.whatsappExtractorInitialized) {
+    console.log("[v0] Running delayed initialization...")
+    window.whatsappExtractorInitialized = true
+    initializeExtractor()
+  }
+}, 2000)
